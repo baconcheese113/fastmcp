@@ -235,7 +235,9 @@ class ClientToolsMixin:
                 # transport-level failure can kill the session runner while this
                 # await waits forever.
                 result = await self._await_with_session_monitoring(
-                    self._resolve_claimed_result(name, driven, read_timeout_seconds)
+                    self._resolve_claimed_result(
+                        name, driven, read_timeout_seconds, progress_callback
+                    )
                 )
 
             # Reflect tool-level errors on the span so callers see ERROR

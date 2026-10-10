@@ -30,9 +30,11 @@ from typing import TYPE_CHECKING, Any, cast
 import mcp_types
 from mcp.client.extension import ClaimContext, ClientExtension, ResultClaim
 from mcp.client.session import ClientRequestContext, ClientSession, ElicitationFnT
+from mcp.shared.dispatcher import ProgressFnT
 from mcp_types import CallToolResult
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
+from fastmcp.client.extension_hooks import ToolCallClaimContext
 from fastmcp.client.telemetry import client_span
 from fastmcp.exceptions import ToolError
 from fastmcp.telemetry import inject_trace_context
@@ -250,6 +252,7 @@ async def _drive_to_terminal(
     task_id: str,
     elicitation_callback: ElicitationFnT | None,
     timeout_seconds: float | None = None,
+    progress_callback: ProgressFnT | None = None,
 ) -> ClientGetTaskResult:
     """Poll `tasks/get` until the task reaches a terminal state.
 
@@ -272,6 +275,7 @@ async def _drive_to_terminal(
     def remaining() -> float | None:
         return None if deadline is None else deadline - loop.time()
 
+    last_message: str | None = None
     while True:
         budget = remaining()
         if budget is not None and budget <= 0:
@@ -293,6 +297,15 @@ async def _drive_to_terminal(
             backoff = MIN_POLL_INTERVAL
             continue
         # working
+        message = current.status_message
+        if progress_callback is not None and message and message != last_message:
+            last_message = message
+            # `tasks/get` carries a status message but no progress numbers. Like the
+            # SDK's own progress dispatch, a failing handler is logged, not raised.
+            try:
+                await progress_callback(0.0, None, message)
+            except Exception:
+                logger.exception("progress callback raised")
         delay, backoff = _next_poll_delay(current.poll_interval_ms, backoff)
         budget = remaining()
         if budget is not None:
@@ -364,6 +377,7 @@ class TasksClientExtension(ClientExtension):
             create_result.task_id,
             self._elicitation_callback,
             ctx.read_timeout_seconds,
+            ctx.progress_callback if isinstance(ctx, ToolCallClaimContext) else None,
         )
         if final.status == "completed":
             return _inlined_call_tool_result(final.result)

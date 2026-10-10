@@ -36,7 +36,6 @@ from mcp.client.client import (
     _synthesize_discover,
 )
 from mcp.client.extension import (
-    ClaimContext,
     ClientExtension,
     NotificationBinding,
     ResultClaim,
@@ -56,7 +55,10 @@ from fastmcp.client.elicitation import (
     ElicitationHandler,
     create_elicitation_callback,
 )
-from fastmcp.client.extension_hooks import build_internal_client_extensions
+from fastmcp.client.extension_hooks import (
+    ToolCallClaimContext,
+    build_internal_client_extensions,
+)
 from fastmcp.client.logging import (
     LogHandler,
     create_log_callback,
@@ -1367,6 +1369,7 @@ class Client(
         name: str,
         result: mcp_types.Result,
         read_timeout_seconds: float | None,
+        progress_callback: ProgressHandler | None = None,
     ) -> mcp_types.CallToolResult:
         """Finish a claimed `tools/call` result through its owning extension.
 
@@ -1380,10 +1383,11 @@ class Client(
         claim = self._claim_by_model[type(result)]
         final = await claim.resolve(
             result,
-            ClaimContext(
+            ToolCallClaimContext(
                 session=self.session,
                 tool_name=name,
                 read_timeout_seconds=read_timeout_seconds,
+                progress_callback=progress_callback,
             ),
         )
         if not final.is_error:

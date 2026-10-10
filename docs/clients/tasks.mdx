@@ -33,6 +33,21 @@ async with Client(server, mode="auto") as client:
 
 This is the right default for most code: it works whether or not the server actually tasks the call, so you can write ordinary tool-calling code without checking server capabilities.
 
+Progress the tool reports while it runs reaches your [progress handler](/clients/progress) the same way it would for an immediate call. The task's status carries a message but no progress numbers, so the handler receives each new message with a progress of `0` and no total.
+
+```python
+import fastmcp_tasks  # enables client task support
+from fastmcp import Client
+
+
+async def show_progress(progress: float, total: float | None, message: str | None):
+    print(message)
+
+
+async with Client(server, mode="auto") as client:
+    await client.call_tool("slow_computation", {"duration": 10}, progress_handler=show_progress)
+```
+
 ## Driving a Task Explicitly
 
 When you want to do other work while a task runs — or check on it, or cancel it — use `call_tool_task` instead. It returns a `ToolTask` handle immediately rather than waiting for completion.

@@ -23,11 +23,28 @@ answer in-task input prompts) and returns a ``ClientExtension`` to register, or
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from mcp.client.extension import ClaimContext
 
 if TYPE_CHECKING:
     from mcp.client.extension import ClientExtension
     from mcp.client.session import ElicitationFnT
+    from mcp.shared.dispatcher import ProgressFnT
+
+
+@dataclass(frozen=True, kw_only=True)
+class ToolCallClaimContext(ClaimContext):
+    """The `ClaimContext` a `Client` passes when resolving a claimed `tools/call`.
+
+    Adds the call's progress handler, which the SDK context does not carry, so a
+    resolver that keeps the call going after the claim (the tasks extension polling
+    `tasks/get`) can report progress the way an immediate call does.
+    """
+
+    progress_callback: ProgressFnT | None = None
+
 
 #: A factory that builds a FastMCP-internal client extension for one ``Client``,
 #: given that client's elicitation callback (``None`` when the client has no

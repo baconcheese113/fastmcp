@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import timedelta
 
 import mcp_types
 import pytest
@@ -19,6 +20,7 @@ from mcp.shared.exceptions import MCPError
 from fastmcp import Context, FastMCP
 from fastmcp.client import Client
 from fastmcp.exceptions import ToolError
+from fastmcp.utilities.tasks import TaskConfig
 from fastmcp_tasks import TasksExtension, call_tool_task
 
 
@@ -231,3 +233,70 @@ async def test_in_task_input_answered_by_handler_set_after_construction(
         result = await client.call_tool("plan_dinner", {})
 
     assert result.data == "Tonight: a vegetarian Thai dinner!"
+
+
+def _progress_server() -> FastMCP:
+    mcp = FastMCP("task-progress")
+    mcp.add_extension(TasksExtension())
+
+    @mcp.tool(
+        task=TaskConfig(mode="optional", poll_interval=timedelta(milliseconds=20))
+    )
+    async def index(ctx: Context) -> str:
+        for i, step in enumerate(("Reading files", "Building index")):
+            await ctx.report_progress(i, 2, step)
+            await asyncio.sleep(0.2)
+        return "done"
+
+    return mcp
+
+
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+async def test_progress_messages_reach_the_progress_handler(mode: str):
+    """A transparently tasked call reports progress like an immediate one.
+
+    Under `legacy` the call runs immediately and `ctx.report_progress` sends
+    `notifications/progress`. Under `auto` it runs as a task, where the same call
+    sets the task's `statusMessage`, which the client sees by polling `tasks/get`.
+    The task should stay invisible, so either way the caller's `progress_handler`
+    sees each message.
+    """
+    messages: list[str | None] = []
+
+    async def record(progress: float, total: float | None, message: str | None) -> None:
+        messages.append(message)
+
+    async with Client(_progress_server(), mode=mode) as client:
+        result = await client.call_tool("index", {}, progress_handler=record)
+
+    assert result.data == "done"
+    assert [m for m in messages if m] == ["Reading files", "Building index"]
+
+
+async def test_a_client_level_progress_handler_sees_task_progress():
+    """The handler given to `Client` applies when the call passes none of its own."""
+    messages: list[str | None] = []
+
+    async def record(progress: float, total: float | None, message: str | None) -> None:
+        messages.append(message)
+
+    async with Client(
+        _progress_server(), mode="auto", progress_handler=record
+    ) as client:
+        await client.call_tool("index", {})
+
+    assert [m for m in messages if m] == ["Reading files", "Building index"]
+
+
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+async def test_a_failing_progress_handler_does_not_fail_the_call(mode: str):
+    """The SDK logs an exception from a progress handler rather than failing the
+    request, so a tasked call has to tolerate one the same way."""
+
+    async def broken(progress: float, total: float | None, message: str | None) -> None:
+        raise RuntimeError("handler bug")
+
+    async with Client(_progress_server(), mode=mode) as client:
+        result = await client.call_tool("index", {}, progress_handler=broken)
+
+    assert result.data == "done"
